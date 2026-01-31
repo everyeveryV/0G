@@ -22,8 +22,9 @@
  *    - 写入操作成功后，React Query 会自动重新获取数据
  */
 
-import { useState } from "react";
-import { useAccount, useReadContract, useWriteContract } from "wagmi";
+import { useState, useEffect } from "react";
+import { useAccount, useReadContract, usePublicClient, useConfig } from "wagmi";
+import { writeContract as wagmiWriteContract } from "wagmi/actions";
 import { ConnectButton } from "@rainbow-me/rainbowkit";
 import {
   CONTRACT_ADDRESS,
@@ -41,9 +42,12 @@ export default function Home() {
   const [reward, setReward] = useState(""); // 奖励金额输入
   const [submissionUrl, setSubmissionUrl] = useState(""); // 提交链接输入
   const [selectedTaskId, setSelectedTaskId] = useState<bigint | null>(null); // Agent选中的任务ID
+  const [refreshTrigger, setRefreshTrigger] = useState(0); // 用于触发任务列表刷新
 
   // ========== Wagmi Hooks ==========
   const { address, isConnected } = useAccount();
+  const config = useConfig();
+  const publicClient = usePublicClient();
 
   // 📖 读取：获取任务总数
   const { data: totalTasks } = useReadContract({
@@ -51,31 +55,60 @@ export default function Home() {
     abi: CONTRACT_ABI,
     functionName: "getTotalTasks",
     query: {
-      // 每 10 秒自动刷新一次（可选，useReadContract 会自动监听链上变化）
+      // 每 10 秒自动刷新一次
       refetchInterval: 10000,
     },
   });
 
-  // 📖 读取：获取所有任务（注意：这里为了简化，逐个读取；生产环境建议用合约批量查询函数）
-  const taskCount = totalTasks ? Number(totalTasks) : 0;
-  const tasks: Task[] = [];
+  // 使用 publicClient 和 useEffect 来获取所有任务
+  const [tasks, setTasks] = useState<Task[]>([]);
 
-  // 批量读取每个任务（使用循环获取）
-  for (let i = 0; i < taskCount; i++) {
-    // eslint-disable-next-line react-hooks/rules-of-hooks
-    const { data: task } = useReadContract({
-      address: CONTRACT_ADDRESS,
-      abi: CONTRACT_ABI,
-      functionName: "tasks",
-      args: [BigInt(i)],
-    });
-    if (task) {
-      tasks.push(task as Task);
-    }
-  }
+  useEffect(() => {
+    const fetchAllTasks = async () => {
+      if (!publicClient) return;
 
-  // ✍️ 写入：合约操作
-  const { writeContract, isConfirming, isConfirmed } = useWriteContract();
+      console.log("🔄 开始获取任务列表... refreshTrigger =", refreshTrigger);
+
+      // 先获取任务总数
+      const taskCountBigInt = await publicClient.readContract({
+        address: CONTRACT_ADDRESS,
+        abi: CONTRACT_ABI,
+        functionName: "getTotalTasks",
+      });
+
+      if (!taskCountBigInt) return;
+
+      const taskCount = Number(taskCountBigInt);
+      console.log("📊 任务总数:", taskCount);
+
+      const fetchedTasks: Task[] = [];
+
+      for (let i = 0; i < taskCount; i++) {
+        try {
+          const task = await publicClient.readContract({
+            address: CONTRACT_ADDRESS,
+            abi: CONTRACT_ABI,
+            functionName: "tasks",
+            args: [BigInt(i)],
+          });
+          if (task) {
+            console.log(`✅ 任务 #${i}:`, task);
+            fetchedTasks.push(task as unknown as Task);
+          }
+        } catch (error) {
+          console.error(`❌ 获取任务 #${i} 失败:`, error);
+        }
+      }
+
+      console.log("📋 设置任务列表，共", fetchedTasks.length, "个任务");
+      setTasks(fetchedTasks);
+    };
+
+    fetchAllTasks();
+  }, [publicClient, refreshTrigger]); // 移除 totalTasks 依赖，直接在 effect 中获取
+
+  // 交易确认状态
+  const [isConfirming, setIsConfirming] = useState(false);
 
   // ========== 事件处理函数 ==========
 
@@ -86,24 +119,53 @@ export default function Home() {
       return;
     }
 
+    setIsConfirming(true);
+
     try {
-      // 调用合约的 createTask 函数
-      await writeContract({
+      console.log("1️⃣ 开始发布任务...", { description, reward });
+
+      // 使用 wagmi action 调用合约
+      const hash = await wagmiWriteContract(config, {
         address: CONTRACT_ADDRESS,
         abi: CONTRACT_ABI,
         functionName: "createTask",
         args: [description],
-        // 将 ETH 转换为 Wei（1 ETH = 10^18 Wei）
         value: BigInt(parseFloat(reward) * 1e18),
       });
 
+      console.log("2️⃣ 交易哈希:", hash);
+
+      if (!hash) {
+        throw new Error("交易哈希为空");
+      }
+
+      console.log("3️⃣ 交易已提交，等待链上确认...");
       // 清空输入框
       setDescription("");
       setReward("");
-      alert("任务发布成功！");
-    } catch (error) {
-      console.error(error);
-      alert("发布失败，请检查控制台");
+      alert("任务发布成功！请等待几秒后查看任务列表。");
+
+      // 等待 5 秒让链上数据更新，然后刷新
+      setTimeout(() => {
+        console.log("4️⃣ 刷新任务列表");
+        console.log("5️⃣ refreshTrigger 当前值:", refreshTrigger);
+        setRefreshTrigger(prev => {
+          const newVal = prev + 1;
+          console.log("6️⃣ refreshTrigger 新值:", newVal);
+          return newVal;
+        });
+      }, 5000);
+    } catch (error: any) {
+      console.error("❌ 发布失败详细错误:", error);
+      console.error("错误堆栈:", error.stack);
+      let errorMsg = "发布失败\n\n";
+      if (error?.message) {
+        errorMsg += `错误: ${error.message}\n\n`;
+      }
+      errorMsg += "请检查:\n1. 钱包是否切换到 0G Testnet (Chain ID: 16602)\n2. 是否有足够的测试币支付 gas\n3. 查看控制台错误详情";
+      alert(errorMsg);
+    } finally {
+      setIsConfirming(false);
     }
   };
 
@@ -114,44 +176,74 @@ export default function Home() {
       return;
     }
 
+    setIsConfirming(true);
+
     try {
-      await writeContract({
+      console.log("开始提交任务...");
+
+      await wagmiWriteContract(config, {
         address: CONTRACT_ADDRESS,
         abi: CONTRACT_ABI,
         functionName: "submitTask",
         args: [selectedTaskId, submissionUrl],
       });
 
+      console.log("交易已提交，等待链上确认...");
+
       setSubmissionUrl("");
       setSelectedTaskId(null);
-      alert("任务提交成功！");
+      alert("任务提交成功！请等待几秒后查看任务状态。");
+
+      // 等待 5 秒让链上数据更新，然后刷新
+      setTimeout(() => {
+        console.log("刷新任务列表");
+        setRefreshTrigger(prev => prev + 1);
+      }, 5000);
     } catch (error) {
       console.error(error);
       alert("提交失败，请检查控制台");
+    } finally {
+      setIsConfirming(false);
     }
   };
 
   // 验收任务（Employer）
   const handleApproveTask = async (taskId: bigint) => {
+    setIsConfirming(true);
+
     try {
-      await writeContract({
+      console.log("开始验收任务...");
+
+      await wagmiWriteContract(config, {
         address: CONTRACT_ADDRESS,
         abi: CONTRACT_ABI,
         functionName: "approveTask",
         args: [taskId],
       });
-      alert("验收成功！资金已释放给 Agent");
+
+      console.log("交易已提交，等待链上确认...");
+      alert("验收成功！请等待几秒后查看任务状态。");
+
+      // 等待 5 秒让链上数据更新，然后刷新
+      setTimeout(() => {
+        console.log("刷新任务列表");
+        setRefreshTrigger(prev => prev + 1);
+      }, 5000);
     } catch (error) {
       console.error(error);
       alert("验收失败，请检查控制台");
+    } finally {
+      setIsConfirming(false);
     }
   };
 
   // ========== 辅助函数 ==========
 
   // 格式化地址（显示前6位和后4位）
-  const formatAddress = (addr: string) =>
-    `${addr.slice(0, 6)}...${addr.slice(-4)}`;
+  const formatAddress = (addr: string) => {
+    if (!addr) return ''; // 如果地址不存在，直接返回空，避免报错
+    return `${addr.slice(0, 6)}...${addr.slice(-4)}`;
+  };
 
   // 格式化 ETH（从 Wei 转换为 ETH）
   const formatETH = (wei: bigint) =>
@@ -347,7 +439,7 @@ export default function Home() {
                     <span>📋</span>
                     <span>我的任务</span>
                   </h2>
-                  {tasks.filter((t) => t.employer.toLowerCase() === address?.toLowerCase())
+                  {tasks.filter((t) => t.employer?.toLowerCase() === address?.toLowerCase())
                     .length === 0 ? (
                     <div className="text-center py-12">
                       <div className="w-16 h-16 bg-amber-200 pixel-border-thin flex items-center justify-center mx-auto mb-4">
@@ -358,7 +450,7 @@ export default function Home() {
                   ) : (
                     <div className="space-y-4">
                       {tasks
-                        .filter((t) => t.employer.toLowerCase() === address?.toLowerCase())
+                        .filter((t) => t.employer?.toLowerCase() === address?.toLowerCase())
                         .map((task) => {
                           const statusStyles = getStatusStyles(task);
                           return (
@@ -507,18 +599,18 @@ export default function Home() {
                     </div>
                   ) : (
                     <div className="space-y-4">
-                      {tasks.map((task) => {
+                      {tasks.map((task, index) => {
                         const statusStyles = getStatusStyles(task);
                         return (
                           <div
-                            key={task.id.toString()}
+                            key={task.id?.toString() || index}
                             className="bg-emerald-50 p-5 pixel-border-thin"
                           >
                             <div className="flex justify-between items-start mb-3">
                               <div className="flex-1">
                                 <div className="flex items-center gap-2 mb-2">
                                   <span className="text-xs text-emerald-600 pixel-font">
-                                    #{task.id.toString()}
+                                    #{task.id?.toString()}
                                   </span>
                                   <span
                                     className={`${statusStyles.bg} ${statusStyles.text} border-2 ${statusStyles.border} px-2 py-1 pixel-font text-xs`}

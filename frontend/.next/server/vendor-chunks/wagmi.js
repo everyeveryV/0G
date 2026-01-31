@@ -211,16 +211,6 @@ eval("__webpack_require__.r(__webpack_exports__);\n/* harmony export */ __webpac
 
 /***/ }),
 
-/***/ "(ssr)/./node_modules/wagmi/dist/esm/hooks/useWriteContract.js":
-/*!***************************************************************!*\
-  !*** ./node_modules/wagmi/dist/esm/hooks/useWriteContract.js ***!
-  \***************************************************************/
-/***/ ((__unused_webpack___webpack_module__, __webpack_exports__, __webpack_require__) => {
-
-eval("__webpack_require__.r(__webpack_exports__);\n/* harmony export */ __webpack_require__.d(__webpack_exports__, {\n/* harmony export */   useWriteContract: () => (/* binding */ useWriteContract)\n/* harmony export */ });\n/* harmony import */ var _tanstack_react_query__WEBPACK_IMPORTED_MODULE_2__ = __webpack_require__(/*! @tanstack/react-query */ \"(ssr)/./node_modules/@tanstack/react-query/build/modern/useMutation.js\");\n/* harmony import */ var _wagmi_core_query__WEBPACK_IMPORTED_MODULE_1__ = __webpack_require__(/*! @wagmi/core/query */ \"(ssr)/./node_modules/@wagmi/core/dist/esm/query/writeContract.js\");\n/* harmony import */ var _useConfig_js__WEBPACK_IMPORTED_MODULE_0__ = __webpack_require__(/*! ./useConfig.js */ \"(ssr)/./node_modules/wagmi/dist/esm/hooks/useConfig.js\");\n/* __next_internal_client_entry_do_not_use__ useWriteContract auto */ \n\n\n/** https://wagmi.sh/react/api/hooks/useWriteContract */ function useWriteContract(parameters = {}) {\n    const { mutation } = parameters;\n    const config = (0,_useConfig_js__WEBPACK_IMPORTED_MODULE_0__.useConfig)(parameters);\n    const mutationOptions = (0,_wagmi_core_query__WEBPACK_IMPORTED_MODULE_1__.writeContractMutationOptions)(config);\n    const { mutate, mutateAsync, ...result } = (0,_tanstack_react_query__WEBPACK_IMPORTED_MODULE_2__.useMutation)({\n        ...mutation,\n        ...mutationOptions\n    });\n    return {\n        ...result,\n        writeContract: mutate,\n        writeContractAsync: mutateAsync\n    };\n} //# sourceMappingURL=useWriteContract.js.map\n//# sourceURL=[module]\n//# sourceMappingURL=data:application/json;charset=utf-8;base64,eyJ2ZXJzaW9uIjozLCJmaWxlIjoiKHNzcikvLi9ub2RlX21vZHVsZXMvd2FnbWkvZGlzdC9lc20vaG9va3MvdXNlV3JpdGVDb250cmFjdC5qcyIsIm1hcHBpbmdzIjoiOzs7Ozs7O3NFQUVtRDtBQVl6QjtBQVFnQjtBQXlDMUMsd0RBQXdELENBQ2xELFNBQVUsZ0JBQWdCLENBSTlCLGFBQTBELEVBQUU7SUFFNUQsTUFBTSxFQUFFLFFBQVEsRUFBRSxHQUFHLFVBQVU7SUFFL0IsTUFBTSxNQUFNLEdBQUcsd0RBQVMsQ0FBQyxVQUFVLENBQUM7SUFFcEMsTUFBTSxlQUFlLEdBQUcsK0VBQTRCLENBQUMsTUFBTSxDQUFDO0lBQzVELE1BQU0sRUFBRSxNQUFNLEVBQUUsV0FBVyxFQUFFLEdBQUcsTUFBTSxFQUFFLEdBQUcsa0VBQVcsQ0FBQztRQUNyRCxHQUFHLFFBQVE7UUFDWCxHQUFHLGVBQWU7S0FDbkIsQ0FBQztJQUdGLE9BQU87UUFDTCxHQUFHLE1BQU07UUFDVCxhQUFhLEVBQUUsTUFBaUM7UUFDaEQsa0JBQWtCLEVBQUUsV0FBMkM7S0FDaEU7QUFDSCxDQUFDIiwic291cmNlcyI6WyJkOlxcc3JjXFxob29rc1xcdXNlV3JpdGVDb250cmFjdC50cyJdLCJuYW1lcyI6W10sImlnbm9yZUxpc3QiOltdLCJzb3VyY2VSb290IjoiIn0=\n//# sourceURL=webpack-internal:///(ssr)/./node_modules/wagmi/dist/esm/hooks/useWriteContract.js\n");
-
-/***/ }),
-
 /***/ "(ssr)/./node_modules/wagmi/dist/esm/hydrate.js":
 /*!************************************************!*\
   !*** ./node_modules/wagmi/dist/esm/hydrate.js ***!
