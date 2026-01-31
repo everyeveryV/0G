@@ -23,8 +23,7 @@
  */
 
 import { useState, useEffect } from "react";
-import { useAccount, useReadContract, usePublicClient, useConfig } from "wagmi";
-import { writeContract as wagmiWriteContract } from "wagmi/actions";
+import { useAccount, useReadContract, usePublicClient, useWriteContract } from "wagmi";
 import { ConnectButton } from "@rainbow-me/rainbowkit";
 import {
   CONTRACT_ADDRESS,
@@ -42,12 +41,40 @@ export default function Home() {
   const [reward, setReward] = useState(""); // 奖励金额输入
   const [submissionUrl, setSubmissionUrl] = useState(""); // 提交链接输入
   const [selectedTaskId, setSelectedTaskId] = useState<bigint | null>(null); // Agent选中的任务ID
-  const [refreshTrigger, setRefreshTrigger] = useState(0); // 用于触发任务列表刷新
 
   // ========== Wagmi Hooks ==========
   const { address, isConnected } = useAccount();
-  const config = useConfig();
   const publicClient = usePublicClient();
+
+  // 写入合约的 hook
+  const { writeContract, data: hash, isPending, error: writeError } = useWriteContract();
+
+  // 用于手动触发刷新的状态
+  const [forceRefresh, setForceRefresh] = useState(0);
+
+  // 监听交易哈希变化，等待交易确认后刷新
+  useEffect(() => {
+    if (!hash || !publicClient) return;
+
+    console.log("📝 交易哈希:", hash);
+
+    const waitForTransaction = async () => {
+      try {
+        console.log("⏳ 等待交易确认...");
+        const receipt = await publicClient.waitForTransactionReceipt({
+          hash,
+          confirmations: 1,
+        });
+        console.log("✅ 交易已确认！", receipt);
+        // 交易确认后触发刷新
+        setForceRefresh(prev => prev + 1);
+      } catch (error) {
+        console.error("❌ 等待交易确认失败:", error);
+      }
+    };
+
+    waitForTransaction();
+  }, [hash, publicClient]);
 
   // 📖 读取：获取任务总数
   const { data: totalTasks } = useReadContract({
@@ -67,7 +94,7 @@ export default function Home() {
     const fetchAllTasks = async () => {
       if (!publicClient) return;
 
-      console.log("🔄 开始获取任务列表... refreshTrigger =", refreshTrigger);
+      console.log("🔄 开始获取任务列表... forceRefresh =", forceRefresh);
 
       // 先获取任务总数
       const taskCountBigInt = await publicClient.readContract({
@@ -85,15 +112,32 @@ export default function Home() {
 
       for (let i = 0; i < taskCount; i++) {
         try {
-          const task = await publicClient.readContract({
+          const taskData = await publicClient.readContract({
             address: CONTRACT_ADDRESS,
             abi: CONTRACT_ABI,
             functionName: "tasks",
             args: [BigInt(i)],
           });
-          if (task) {
+          if (taskData) {
+            // taskData 是数组，需要转换成对象
+            // [id, employer, agent, description, reward, submissionUrl, isSubmitted, isApproved, isCompleted]
+            const taskArray = taskData as unknown as readonly [bigint, string, string, string, bigint, string, boolean, boolean, boolean];
+            const task: Task = {
+              id: taskArray[0],
+              employer: taskArray[1],
+              agent: taskArray[2],
+              description: taskArray[3],
+              reward: taskArray[4],
+              submissionUrl: taskArray[5],
+              isSubmitted: taskArray[6],
+              isApproved: taskArray[7],
+              isCompleted: taskArray[8],
+            };
             console.log(`✅ 任务 #${i}:`, task);
-            fetchedTasks.push(task as unknown as Task);
+            console.log(`  - employer: ${task.employer}`);
+            console.log(`  - description: ${task.description}`);
+            console.log(`  - reward: ${task.reward}`);
+            fetchedTasks.push(task);
           }
         } catch (error) {
           console.error(`❌ 获取任务 #${i} 失败:`, error);
@@ -101,14 +145,13 @@ export default function Home() {
       }
 
       console.log("📋 设置任务列表，共", fetchedTasks.length, "个任务");
+      console.log("🔑 当前连接的地址:", address);
+      console.log("📋 过滤后的我的任务:", fetchedTasks.filter((t) => t.employer?.toLowerCase() === address?.toLowerCase()));
       setTasks(fetchedTasks);
     };
 
     fetchAllTasks();
-  }, [publicClient, refreshTrigger]); // 移除 totalTasks 依赖，直接在 effect 中获取
-
-  // 交易确认状态
-  const [isConfirming, setIsConfirming] = useState(false);
+  }, [publicClient, forceRefresh]); // 交易成功后自动刷新
 
   // ========== 事件处理函数 ==========
 
@@ -119,13 +162,10 @@ export default function Home() {
       return;
     }
 
-    setIsConfirming(true);
-
     try {
       console.log("1️⃣ 开始发布任务...", { description, reward });
 
-      // 使用 wagmi action 调用合约
-      const hash = await wagmiWriteContract(config, {
+      writeContract({
         address: CONTRACT_ADDRESS,
         abi: CONTRACT_ABI,
         functionName: "createTask",
@@ -133,39 +173,16 @@ export default function Home() {
         value: BigInt(parseFloat(reward) * 1e18),
       });
 
-      console.log("2️⃣ 交易哈希:", hash);
+      console.log("2️⃣ 交易已提交");
 
-      if (!hash) {
-        throw new Error("交易哈希为空");
-      }
-
-      console.log("3️⃣ 交易已提交，等待链上确认...");
       // 清空输入框
       setDescription("");
       setReward("");
-      alert("任务发布成功！请等待几秒后查看任务列表。");
-
-      // 等待 5 秒让链上数据更新，然后刷新
-      setTimeout(() => {
-        console.log("4️⃣ 刷新任务列表");
-        console.log("5️⃣ refreshTrigger 当前值:", refreshTrigger);
-        setRefreshTrigger(prev => {
-          const newVal = prev + 1;
-          console.log("6️⃣ refreshTrigger 新值:", newVal);
-          return newVal;
-        });
-      }, 5000);
+      alert("任务发布中！请在钱包中确认交易，等待几秒后查看任务列表。");
     } catch (error: any) {
       console.error("❌ 发布失败详细错误:", error);
       console.error("错误堆栈:", error.stack);
-      let errorMsg = "发布失败\n\n";
-      if (error?.message) {
-        errorMsg += `错误: ${error.message}\n\n`;
-      }
-      errorMsg += "请检查:\n1. 钱包是否切换到 0G Testnet (Chain ID: 16602)\n2. 是否有足够的测试币支付 gas\n3. 查看控制台错误详情";
-      alert(errorMsg);
-    } finally {
-      setIsConfirming(false);
+      alert("发布失败，请检查控制台");
     }
   };
 
@@ -176,64 +193,44 @@ export default function Home() {
       return;
     }
 
-    setIsConfirming(true);
-
     try {
       console.log("开始提交任务...");
 
-      await wagmiWriteContract(config, {
+      writeContract({
         address: CONTRACT_ADDRESS,
         abi: CONTRACT_ABI,
         functionName: "submitTask",
         args: [selectedTaskId, submissionUrl],
       });
 
-      console.log("交易已提交，等待链上确认...");
+      console.log("交易已提交");
 
       setSubmissionUrl("");
       setSelectedTaskId(null);
-      alert("任务提交成功！请等待几秒后查看任务状态。");
-
-      // 等待 5 秒让链上数据更新，然后刷新
-      setTimeout(() => {
-        console.log("刷新任务列表");
-        setRefreshTrigger(prev => prev + 1);
-      }, 5000);
+      alert("任务提交中！请在钱包中确认交易，等待几秒后查看任务状态。");
     } catch (error) {
       console.error(error);
       alert("提交失败，请检查控制台");
-    } finally {
-      setIsConfirming(false);
     }
   };
 
   // 验收任务（Employer）
   const handleApproveTask = async (taskId: bigint) => {
-    setIsConfirming(true);
-
     try {
       console.log("开始验收任务...");
 
-      await wagmiWriteContract(config, {
+      writeContract({
         address: CONTRACT_ADDRESS,
         abi: CONTRACT_ABI,
         functionName: "approveTask",
         args: [taskId],
       });
 
-      console.log("交易已提交，等待链上确认...");
-      alert("验收成功！请等待几秒后查看任务状态。");
-
-      // 等待 5 秒让链上数据更新，然后刷新
-      setTimeout(() => {
-        console.log("刷新任务列表");
-        setRefreshTrigger(prev => prev + 1);
-      }, 5000);
+      console.log("交易已提交");
+      alert("验收中！请在钱包中确认交易，等待几秒后查看任务状态。");
     } catch (error) {
       console.error(error);
       alert("验收失败，请检查控制台");
-    } finally {
-      setIsConfirming(false);
     }
   };
 
@@ -425,10 +422,10 @@ export default function Home() {
                     </div>
                     <button
                       onClick={handleCreateTask}
-                      disabled={isConfirming}
+                      disabled={isPending}
                       className="w-full bg-amber-700 text-amber-100 pixel-font text-xs py-4 pixel-border pixel-btn disabled:opacity-50 disabled:cursor-not-allowed"
                     >
-                      {isConfirming ? "发布中..." : "发布任务"}
+                      {isPending ? "发布中..." : "发布任务"}
                     </button>
                   </div>
                 </div>
@@ -492,10 +489,10 @@ export default function Home() {
                                   address?.toLowerCase() && (
                                 <button
                                   onClick={() => handleApproveTask(task.id)}
-                                  disabled={isConfirming}
+                                  disabled={isPending}
                                   className="mt-4 w-full bg-green-600 text-green-100 pixel-font text-xs py-3 pixel-border pixel-btn disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
                                 >
-                                  {isConfirming ? (
+                                  {isPending ? (
                                     "处理中..."
                                   ) : (
                                     <>
@@ -576,10 +573,10 @@ export default function Home() {
                     </div>
                     <button
                       onClick={handleSubmitTask}
-                      disabled={isConfirming}
+                      disabled={isPending}
                       className="w-full bg-green-600 text-green-100 pixel-font text-xs py-4 pixel-border pixel-btn disabled:opacity-50 disabled:cursor-not-allowed"
                     >
-                      {isConfirming ? "提交中..." : "提交任务"}
+                      {isPending ? "提交中..." : "提交任务"}
                     </button>
                   </div>
                 </div>
